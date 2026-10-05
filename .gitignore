@@ -1,0 +1,43 @@
+# Visual Studio / Windows driver build output
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+ARM64/
+*.sys
+*.pdb
+*.obj
+*.ilk
+*.exp
+*.lib
+*.cer
+*.cat
+*.inf.resources
+*.log
+*.tlog
+*.lastbuildstate
+*.idb
+*.ipdb
+*.iobj
+
+# Visual Studio working files
+.vs/
+*.user
+*.suo
+*.vcxproj.user
+*.VC.db
+*.VC.VC.opendb
+
+# Driver test / deploy artifacts
+*.aps
+DriverTest/
+TestStore/
+
+# OS cruft
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Secrets — never commit the KDNET key or any local notes with it
+kdnet-key.txt
+*.secret
