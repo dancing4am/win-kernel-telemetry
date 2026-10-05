@@ -1,8 +1,8 @@
 # win-kernel-telemetry
 
-Hands-on Windows kernel driver lab: KMDF/WDM telemetry drivers exploring the
-primitives behind endpoint detection (EDR) and anti-cheat — process and
-image-load monitoring, and related kernel callback techniques.
+Hands-on Windows kernel driver lab: KMDF/WDM drivers exploring the primitives
+behind endpoint detection (EDR) and anti-cheat — process and image-load
+monitoring, and process protection.
 
 Each driver is small, commented, and built to be understood rather than
 shipped. Everything runs in an isolated VM with test signing enabled; nothing
@@ -15,6 +15,7 @@ here is meant to run on a production machine.
 | 01 | `01-hello-world` | Minimal KMDF driver that logs `DriverEntry` and `EvtDeviceAdd` | KMDF skeleton, PnP load via a root-enumerated device |
 | 02 | `02-process-monitor` | Logs every process create/exit, with PID, parent PID, and image path | WDM, `PsSetCreateProcessNotifyRoutineEx` |
 | 03 | `03-image-load-monitor` | Logs DLL/driver image loads, filtered to images loaded from outside trusted install roots | WDM, `PsSetLoadImageNotifyRoutine` |
+| 04 | `04-process-protect` | Blocks other processes from reading/writing a protected process's memory (anti-cheat style), with a fakegame/reader test harness | WDM, `ObRegisterCallbacks` |
 
 ## What each driver teaches
 
@@ -37,47 +38,75 @@ linked with `/INTEGRITYCHECK`. Without it, registration fails at load with
 
 ### 03 — image-load monitor
 Same WDM service pattern, registering an image-load callback instead. Every DLL,
-driver, or EXE mapped into any process fires the callback — which is a firehose,
-since one app loads dozens of DLLs.
+driver, or EXE mapped into any process fires the callback — a firehose, since
+one app loads dozens of DLLs.
 
-To stay useful (and to keep the debugged VM responsive), it filters: kernel
-images are always of interest, and user images are logged only when loaded from
-outside the normal install roots (`\Windows\`, `\Program Files\`,
-`\Program Files (x86)\`, `\ProgramData\`). This mirrors the EDR principle of
-*normal is quiet, suspicious is loud* — a DLL loading from a user's AppData or
-Temp folder is exactly what you want to see.
+To stay useful (and to keep the debugged VM responsive), it filters: images are
+logged only when loaded from outside the normal install roots (`\Windows\`,
+`\Program Files\`, `\Program Files (x86)\`, `\ProgramData\`). This mirrors the
+EDR principle of *normal is quiet, suspicious is loud* — a DLL loading from a
+user's AppData or Temp folder is exactly what you want to see. It is a path
+heuristic, not a trust decision; production EDR checks the image's digital
+signature instead (see Roadmap).
 
-This is a path heuristic, not a real trust decision. Any of those folders could
-hold a malicious file, so production EDR checks the image's digital signature
-instead. That signature-based check is the natural next step (see Roadmap).
+### 04 — process protect
+Where 01–03 observe, this one intervenes. Using `ObRegisterCallbacks`, it runs a
+pre-operation callback before any handle to a process is created, and for the
+protected "game" process it strips `PROCESS_VM_READ` / `PROCESS_VM_WRITE` from
+the requested access. The opener still gets a handle, but the later
+`ReadProcessMemory` fails with access denied. This is the anti-cheat side of the
+same coin as 03: instead of watching the whole system, it protects one process
+from external memory reads — the main defense against external cheats.
+
+Scope choices that matter:
+- Only `VM_READ` / `VM_WRITE` are stripped. Stripping `VM_OPERATION` /
+  `TERMINATE` as well broke normal OS process management (a modern UWP Notepad
+  wouldn't even launch). Trimming just the memory-access rights blocks cheats
+  while leaving the OS able to create and manage the process.
+- The protected target is a plain console exe (`fakegame`), not a UWP app, so
+  the behaviour is clean and testable.
+
+Test harness (`test/fakegame`, `test/reader`):
+- `fakegame` holds a secret value and prints its PID and the value's address.
+- `reader` opens that PID and tries to `ReadProcessMemory` the address.
+- Without the driver: reader reads the value (1337). With the driver loaded:
+  `OpenProcess` still succeeds, but `ReadProcessMemory` fails with error 5
+  (access denied). The test binaries are built `/MT` (static runtime) so they
+  run on a VM with no Visual C++ redistributable installed.
 
 ## Cross-cutting lessons
 
-- Callbacks must be cleaned up. A process/image notify routine left registered
-  after the driver unloads means the kernel calls freed memory on the next
-  event — an instant BSOD. `DriverUnload` always deregisters the callback.
+- Callbacks must be cleaned up. A notify/Ob callback left registered after the
+  driver unloads means the kernel calls freed memory on the next event — an
+  instant BSOD. `DriverUnload` always deregisters.
 - Callbacks must be lightweight. Logging over the network inside the callback
-  made the VM visibly stutter, because every image load blocked on I/O. Real EDR
-  captures minimal data in the callback and does the heavy work on a separate
-  thread.
+  made the VM stutter, because every image load blocked on I/O. Real EDR
+  captures minimal data in the callback and does heavy work on a worker thread.
+- Protection is a balancing act. Too strict and the protected app (or the OS)
+  breaks; too loose and a cheat gets through. 04 shows this directly.
 - Primitive drivers. A driver with no device doesn't install "on a device".
-  Either remove the INF (02) or declare it primitive with a `[DefaultInstall]`
-  section and `PnpLockdown=1` (03).
+  Either remove the INF, or declare it primitive with a `[DefaultInstall]`
+  section and `PnpLockdown=1`.
 
 ## Roadmap
 
-- 04 — signature-based filtering (planned): replace the path heuristic with an
-  actual image-signature check, and/or move logging off the callback thread onto
-  a worker queue — both steps toward how production EDR really works.
+- 05 — signature-based filtering / off-thread logging (planned): replace 03's
+  path heuristic with a real image-signature check, and move logging off the
+  callback thread onto a worker queue — both steps toward how production EDR
+  really works.
+- Possible: narrow 04 to also consider the opener (trust OS-core processes),
+  and protect by PID rather than image name.
 
 ## Building
 
 - Visual Studio 2026 with the Desktop development with C++ workload and the
   Windows Driver Kit (WDK) component, plus the Spectre-mitigated libraries.
 - A matching Windows SDK and WDK (build numbers must match).
-- For the callback drivers, add `/INTEGRITYCHECK` under
+- For the callback drivers (02/03/04), add `/INTEGRITYCHECK` under
   Linker > Command Line > Additional Options.
 - Open the solution in each driver folder, select `Debug | x64`, and Build.
+- Test exes (fakegame/reader) are plain console apps; build them `Release | x64`
+  with Runtime Library set to `/MT` so they need no runtime DLLs on the VM.
 
 ## Testing (isolated VM only)
 
@@ -85,7 +114,7 @@ Drivers are test-signed, so they load only on a machine with test signing on:
 
     bcdedit /set testsigning on
 
-Load a service driver (02/03):
+Load a service driver (02/03/04):
 
     sc create <Name> type= kernel binPath= C:\Windows\System32\drivers\<file>.sys
     sc start <Name>
@@ -105,6 +134,6 @@ tutorial, adapted with added comments.
 
 ## Disclaimer
 
-For learning and defensive research only. These drivers collect telemetry and
-do not modify system behavior. Run them in a disposable VM, never on a machine
-you care about.
+For learning and defensive research only. These drivers collect telemetry and,
+in 04, restrict handle access to a process you control in a disposable VM. Run
+them in a VM, never on a machine you care about.
