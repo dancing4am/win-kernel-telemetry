@@ -1,0 +1,44 @@
+;
+; 03-image-load-monitor.inf
+;
+; Primitive driver: no device, loaded as a service (sc create / sc start).
+;
+
+[Version]
+Signature="$WINDOWS NT$"
+Class=System
+ClassGuid={4d36e97d-e325-11ce-bfc1-08002be10318}
+Provider=%ManufacturerName%
+DriverVer=
+CatalogFile=03-image-load-monitor.cat
+PnpLockdown=1
+
+[DestinationDirs]
+DefaultDestDir = 13
+
+[SourceDisksNames]
+1 = %DiskName%,,,""
+
+[SourceDisksFiles]
+03-image-load-monitor.sys = 1
+
+[DefaultInstall.NT$ARCH$]
+CopyFiles = DriverCopyFiles
+
+[DriverCopyFiles]
+03-image-load-monitor.sys
+
+[DefaultInstall.NT$ARCH$.Services]
+AddService = ImageMon,0x2,ServiceInstall
+
+[ServiceInstall]
+DisplayName   = %ServiceName%
+ServiceType   = 1
+StartType     = 3
+ErrorControl  = 1
+ServiceBinary = %13%\03-image-load-monitor.sys
+
+[Strings]
+ManufacturerName = "win-kernel-telemetry"
+ServiceName      = "ImageMon image-load monitor"
+DiskName         = "03-image-load-monitor Source Disk"
