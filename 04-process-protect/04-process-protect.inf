@@ -1,0 +1,44 @@
+;
+; 04-process-protect.inf
+;
+; Primitive driver: no device, loaded as a service (sc create / sc start).
+;
+
+[Version]
+Signature   = "$WINDOWS NT$"
+Class       = System
+ClassGuid   = {4d36e97d-e325-11ce-bfc1-08002be10318}
+Provider    = %ManufacturerName%
+DriverVer   =
+CatalogFile = 04-process-protect.cat
+PnpLockdown = 1
+
+[DestinationDirs]
+DefaultDestDir = 13
+
+[SourceDisksNames]
+1 = %DiskName%,,,""
+
+[SourceDisksFiles]
+04-process-protect.sys = 1
+
+[DefaultInstall.NT$ARCH$]
+CopyFiles = DriverCopyFiles
+
+[DriverCopyFiles]
+04-process-protect.sys
+
+[DefaultInstall.NT$ARCH$.Services]
+AddService = ProcProtect,0x2,ServiceInstall
+
+[ServiceInstall]
+DisplayName   = %ServiceName%
+ServiceType   = 1
+StartType     = 3
+ErrorControl  = 1
+ServiceBinary = %13%\04-process-protect.sys
+
+[Strings]
+ManufacturerName = "win-kernel-telemetry"
+ServiceName      = "ProcProtect process protection"
+DiskName         = "04-process-protect Source Disk"
