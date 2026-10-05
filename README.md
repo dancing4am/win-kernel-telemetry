@@ -13,7 +13,7 @@ here is meant to run on a production machine.
 | # | Driver | What it does | Technique |
 |---|--------|--------------|-----------|
 | 01 | `01-hello-world` | Minimal KMDF driver that logs `DriverEntry` and `EvtDeviceAdd` | KMDF skeleton, PnP load via a root-enumerated device |
-| 02 | `02-process-monitor` *(planned)* | Logs every process create/exit | `PsSetCreateProcessNotifyRoutineEx` |
+| 02 | `02-process-monitor` | Logs every process create/exit | `PsSetCreateProcessNotifyRoutineEx` |
 | 03 | `03-image-load-monitor` *(planned)* | Logs every DLL/driver image load | `PsSetLoadImageNotifyRoutine` |
 
 ## Background
