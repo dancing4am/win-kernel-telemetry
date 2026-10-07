@@ -2,8 +2,8 @@
 
 Hands-on Windows kernel driver lab: KMDF/WDM drivers exploring the primitives
 behind endpoint detection (EDR) and anti-cheat — process and image-load
-monitoring, process protection, off-thread event handling, and load-time
-anomaly detection.
+monitoring, process protection, off-thread event handling, load-time
+anomaly detection, and image signing-level observation.
 
 Each driver is small, commented, and built to be understood rather than
 shipped. Everything runs in an isolated VM with test signing enabled; nothing
@@ -15,7 +15,7 @@ here is meant to run on a production machine.
 |---|--------|--------------|-----------|
 | 01 | `01-hello-world` | Minimal KMDF driver that logs `DriverEntry` and `EvtDeviceAdd` | KMDF skeleton, PnP load via a root-enumerated device |
 | 02 | `02-process-monitor` | Logs every process create/exit, with PID, parent PID, and image path | WDM, `PsSetCreateProcessNotifyRoutineEx` |
-| 03 | `03-image-load-monitor` | Logs DLL/driver image loads, filtered to images from outside trusted install roots | WDM, `PsSetLoadImageNotifyRoutine` |
+| 03 | `03-image-load-monitor` | Logs image loads from outside trusted install roots, and records each image's Code Integrity signing level (per-level histogram on unload) | WDM, `PsSetLoadImageNotifyRoutine` + `IMAGE_INFO.ImageSignatureLevel` |
 | 04 | `04-process-protect` | Blocks other processes from reading/writing a protected process's memory (anti-cheat style), with a fakegame/reader test harness | WDM, `ObRegisterCallbacks` |
 | 05 | `05-image-monitor-async` | Same events as 03, but the callback only queues; a worker thread does the logging off the callback path | WDM, producer/consumer (spin lock + linked list + system thread) |
 | 06 | `06-late-driver-monitor` | Flags kernel-mode drivers that load long after boot — the BYOVD timing signal | WDM, `PsSetLoadImageNotifyRoutine` + `KeQueryInterruptTime`, auto-start |
@@ -46,6 +46,8 @@ one app loads dozens of DLLs. It filters to images loaded from outside the
 normal install roots (`\Windows\`, `\Program Files\`, `\Program Files (x86)\`,
 `\ProgramData\`): *normal is quiet, suspicious is loud*. A path heuristic, not a
 trust decision — production EDR checks the image's digital signature instead.
+
+**Signing-level observation (added).** The same callback also reads `IMAGE_INFO.ImageSignatureLevel`, the trust level Code Integrity (CI) assigns to each image (a 4-bit field in the base `IMAGE_INFO`, Windows 8.1+, read with `& 0xF`; it is *not* gated by `ExtendedInfoPresent`, which only exposes the `FileObject` for verifying the signer yourself). This build only observes: it counts images per signing level and prints a histogram on unload, the data you look at before writing a rule. `UNCHECKED` (level 0, CI never evaluated the image) is not `UNSIGNED` (level 1, CI evaluated it and found no signature). A real desktop run (2009 user-mode images) came back ~89% `WINDOWS`, 112 `UNCHECKED`, 0 `UNSIGNED`; `UNCHECKED` is common because Windows does not re-run CI on every image. It also confirmed that images CI blocks never reach the callback: a Chrome DLL that failed the signing policy was blocked and never appeared in the histogram.
 
 ### 04 — process protect
 Where 01–03 observe, this one intervenes. Using `ObRegisterCallbacks`, a
@@ -123,15 +125,15 @@ more riskily, boot-start) is as close as this lab gets.
 - Primitive drivers. A driver with no device doesn't install "on a device".
   Either remove the INF, or declare it primitive with a `[DefaultInstall]`
   section and `PnpLockdown=1`.
+- Observe before you enforce. 03 records signing levels before any rule is written, and shows that `UNCHECKED` (CI never looked) is not `UNSIGNED` (CI looked, found nothing); measuring the real distribution first keeps the eventual rule from drowning in false positives (see 03).
 
 ## Roadmap
 
-- 07 — signature-based trust: verify the image's digital signer instead of
-  03's path heuristic or 06's load-timing. Closer to how production EDR decides
-  what to trust.
-- Stretch: run 06 as a boot-start driver for a true from-zero baseline —
-  carefully, since a bug in a boot-start driver can block the machine from
-  booting.
+- IOCTL (I/O control) user-mode to kernel communication: a user-mode component that talks to the driver, with input validation. The piece every real anti-cheat has, and a different driver shape from the callbacks here.
+- Thread-create callback to detect remote-thread injection.
+- Turn 03's signing-level observation into a trust decision: a per-file breakdown (which files at each level) and a flag rule, or verify the signer directly via the image's `FileObject`.
+- Improve 04: cache PID/EPROCESS, protect the thread object, and protect by PID rather than by image name.
+- Stretch: run 06 as a boot-start driver for a true from-zero baseline, carefully, since a bug in a boot-start driver can block the machine from booting.
 
 ## Building
 
