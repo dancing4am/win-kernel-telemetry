@@ -1,0 +1,12 @@
+<Solution>
+  <Configurations>
+    <Platform Name="ARM64" />
+    <Platform Name="x64" />
+  </Configurations>
+  <Project Path="07-ioctl-control.vcxproj">
+    <Deploy />
+  </Project>
+  <Project Path="client/client.vcxproj" Id="dfb4e006-2d9b-4e2b-817f-3ec6e0221fb5">
+    <Platform Project="x64" />
+  </Project>
+</Solution>
